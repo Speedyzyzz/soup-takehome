@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# PyTorch / HF Checkpoints
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+*.pth
+output/
+output_merged/
+output_4bit/
+
+# Datasets cache
+data/
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store

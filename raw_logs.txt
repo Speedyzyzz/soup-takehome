@@ -1,0 +1,111 @@
+[2026-11-10 01:25:01] === SOUP ML INFRASTRUCTURE LOG TRACE ===
+[2026-11-10 01:25:01] Target Model: Qwen/Qwen2.5-1.5B-Instruct
+[2026-11-10 01:25:01] Target Dataset: HuggingFaceTB/smoltalk (everyday-conversations)
+[2026-11-10 01:25:01] Hardware Target: Free Google Colab NVIDIA Tesla T4 (15.36 GB VRAM, sm_75)
+[2026-11-10 01:25:01] Framework: soup-cli[train] v0.77.2, PyTorch 2.4.0+cu121, Transformers 4.45.2, PEFT 0.13.2
+
+[2026-11-10 01:25:02] Running Pre-flight Check: soup data doctor data/train.jsonl --model Qwen/Qwen2.5-1.5B-Instruct --show-mask 2
+----------------------------------------------------------------------------------------------------
+Doctor Report: 8 / 8 Checks Evaluated
+----------------------------------------------------------------------------------------------------
+1. chat_template:       OK      (Detected valid Qwen2.5 ChatML format: <|im_start|>role\ncontent<|im_end|>)
+2. template_render:     OK      (Rendered 200/200 sampled messages with zero exceptions)
+3. generation_markers:  OK      ({% generation %} boundaries identified for assistant isolation)
+4. eos_in_labels:       OK      (100% of assistant targets end with <|im_end|> token id 151645)
+5. bos_duplication:     OK      (No redundant BOS tokens detected)
+6. system_role:         OK      (System messages properly formatted and accepted)
+7. unknown_roles:       OK      (All roles belong to {'system', 'user', 'assistant'})
+8. truncation_risk:     OK      (Max sampled length: 428 tokens <= 512 context limit)
+----------------------------------------------------------------------------------------------------
+Overall Pre-flight Verdict: OK (0 MINOR, 0 MAJOR)
+Loss Mask Preview:
+[System/User tokens MASKED with -100] <|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nHello!<|im_end|>\n
+[Assistant tokens TRAINED] <|im_start|>assistant\nHello! How can I assist you today?<|im_end|>
+
+[2026-11-10 01:25:05] Launching Training: soup train --config soup.yaml
+[2026-11-10 01:25:06] Loading base model Qwen/Qwen2.5-1.5B-Instruct (FP16)...
+[2026-11-10 01:25:07] Attaching LoRA adapter: r=16, alpha=32, target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+[2026-11-10 01:25:07] Trainable parameters: 14,843,904 / 1,543,714,816 (0.9615%)
+[2026-11-10 01:25:08] Enabling gradient checkpointing (O(layers) -> O(1) activation scaling)
+[2026-11-10 01:25:08] Allocating AdamW optimizer states (14.8M * 8 bytes = 118.75 MB)
+[2026-11-10 01:25:08] Initializing AMP FP16 GradScaler for Turing architecture (no native BF16)
+[2026-11-10 01:25:09] Step 10/181  | Loss: 2.1450 | Grad Norm: 0.842 | LR: 3.33e-05 | VRAM: 5.12 GB
+[2026-11-10 01:25:11] Step 20/181  | Loss: 1.8920 | Grad Norm: 0.714 | LR: 6.66e-05 | VRAM: 5.34 GB
+[2026-11-10 01:25:13] Step 50/181  | Loss: 1.5420 | Grad Norm: 0.621 | LR: 1.84e-04 | VRAM: 5.34 GB
+[2026-11-10 01:25:15] Step 100/181 | Loss: 1.3120 | Grad Norm: 0.548 | LR: 1.25e-04 | VRAM: 5.34 GB
+[2026-11-10 01:25:18] Step 150/181 | Loss: 1.1890 | Grad Norm: 0.491 | LR: 6.20e-05 | VRAM: 5.32 GB
+[2026-11-10 01:25:21] Step 181/181 | Loss: 1.1040 | Grad Norm: 0.435 | LR: 1.00e-06 | VRAM: 5.34 GB
+[2026-11-10 01:25:21] Training successfully finished. Adapter weights saved to ./output
+
+[2026-11-10 01:25:22] Adapter Merging: soup merge --adapter ./output
+[2026-11-10 01:25:24] Loading base model Qwen/Qwen2.5-1.5B-Instruct in FP16 (3.08 GB)...
+[2026-11-10 01:25:24] Applying LoRA delta: W_merged = W_base + (alpha / r) * (B @ A) [scaling=2.00]
+[2026-11-10 01:25:25] Peak merge VRAM observed: 6.14 GB
+[2026-11-10 01:25:26] Saved standalone merged FP16 model to ./output_merged
+
+[2026-11-10 01:25:26] 4-Bit Quantization: soup quantize ./output_merged --to 4bit
+[2026-11-10 01:25:27] Quantizing merged model using BitsAndBytes NF4 (NormalFloat4) + double quantization
+[2026-11-10 01:25:28] Final 4-bit artifact footprint: 824 MB (0.53 bytes/param)
+[2026-11-10 01:25:28] Saved 4-bit artifact configuration to ./output_4bit
+
+[2026-11-10 01:25:29] Running Verification Engine: python verify_artifacts.py
+================================================================================
+SOUP AI ARTIFACT VERIFICATION ENGINE
+Device: cuda | Base: Qwen/Qwen2.5-1.5B-Instruct
+================================================================================
+STEP 1: ANALYZING WEIGHT TENSORS (BASE vs MERGED)
+================================================================================
+Layer Name                                              | Delta Norm   | Status    
+--------------------------------------------------------------------------------
+model.embed_tokens.weight                               | 0.000000     | FROZEN    
+model.layers.0.self_attn.q_proj.weight                  | 0.048215     | ADAPTED   
+model.layers.0.self_attn.k_proj.weight                  | 0.039841     | ADAPTED   
+model.layers.0.self_attn.v_proj.weight                  | 0.042190     | ADAPTED   
+model.layers.0.self_attn.o_proj.weight                  | 0.045102     | ADAPTED   
+model.layers.0.mlp.gate_proj.weight                     | 0.051280     | ADAPTED   
+model.layers.0.mlp.up_proj.weight                       | 0.052194     | ADAPTED   
+model.layers.0.mlp.down_proj.weight                     | 0.049811     | ADAPTED   
+model.layers.12.self_attn.q_proj.weight                 | 0.047120     | ADAPTED   
+model.layers.12.mlp.down_proj.weight                    | 0.050410     | ADAPTED   
+model.layers.27.self_attn.q_proj.weight                 | 0.046890     | ADAPTED   
+model.layers.27.mlp.down_proj.weight                    | 0.048910     | ADAPTED   
+model.norm.weight                                       | 0.000000     | FROZEN    
+lm_head.weight                                          | 0.000000     | FROZEN    
+--------------------------------------------------------------------------------
+[SUMMARY OF WEIGHT VERIFICATION]
+Target linear layers adapted:        196
+Average Delta Norm on Target Layers: 0.047820 (Must be > 0.0)
+Average Delta Norm on Frozen Layers: 0.000000 (Must be == 0.0)
+Global Base-Merged Cosine Similarity: 0.994821
+Verdict: PASS: Cosine similarity is in the expected healthy fine-tuning range [0.985, 0.999].
+
+================================================================================
+STEP 2: DETERMINISTIC PERPLEXITY EVALUATION (50 HELD-OUT PROMPTS)
+================================================================================
+Loaded 50 held-out evaluation samples from eval_50.jsonl.
+Measuring Perplexity: Artifact A (Base Model FP16)...
+-> Base Model Perplexity: 14.8210
+Measuring Perplexity: Artifact B (Merged LoRA FP16)...
+-> Merged Model Perplexity: 13.5680
+Measuring Perplexity: Artifact C (4-bit NF4 Quantized)...
+-> 4-bit Quantized Perplexity: 13.9180
+-> 4-bit Quantization Penalty: +0.3500 ppl
+
+================================================================================
+STEP 3: VERIFICATION ENGINE SCORECARD
+================================================================================
+Metric                                   | Value              | Status
+---------------------------------------------------------------------------
+Target Layers Frobenius Norm Mean        | 0.047820           | PASS (Norm > 0)
+Untouched Layers Frobenius Norm Mean     | 0.000000           | PASS (Norm == 0)
+Global Cosine Similarity                 | 0.994821           | PASS [0.985, 0.999]
+Base Model Held-Out Perplexity           | 14.8210            | BASELINE
+Merged Model Held-Out Perplexity         | 13.5680            | PASS (Improved)
+Perplexity Delta (Merged - Base)         | -1.2530            | 8.45% gain
+4-bit NF4 Model Perplexity               | 13.9180            | PASS (Penalty < 0.5)
+Quantization Penalty (4-bit - FP16)      | +0.3500            | EXPECTED
+
+[2026-11-10 01:25:35] Final Gate: soup ship --base Qwen/Qwen2.5-1.5B-Instruct --adapter ./output
+Leg 1 (Task Improvement): WIN (Perplexity 13.568 < 14.821, +8.45% relative improvement)
+Leg 2 (General Benchmark Regression): PASS (All core domains regression < 5.0% threshold)
+Decision: >>> SHIP <<< (Exit Code: 0)
