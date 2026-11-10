@@ -198,13 +198,17 @@ tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct")
 def build_multiturn_assistant_labels(messages, tok, max_length=512):
     full_ids, labels = [], []
     for idx, msg in enumerate(messages):
-        prefix_txt = tok.apply_chat_template(
-            messages[:idx], tokenize=False, add_generation_prompt=(msg["role"] == "assistant")
-        )
+        if idx == 0:
+            prefix_ids = []
+        else:
+            prefix_txt = tok.apply_chat_template(
+                messages[:idx], tokenize=False, add_generation_prompt=(msg["role"] == "assistant")
+            )
+            prefix_ids = tok.encode(prefix_txt, add_special_tokens=False)
+
         upto_txt = tok.apply_chat_template(
             messages[:idx + 1], tokenize=False, add_generation_prompt=False
         )
-        prefix_ids = tok.encode(prefix_txt, add_special_tokens=False)
         upto_ids = tok.encode(upto_txt, add_special_tokens=False)
 
         if idx == 0:

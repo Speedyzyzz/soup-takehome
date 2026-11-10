@@ -131,18 +131,21 @@ def build_assistant_masked_labels(
     labels: List[int] = []
 
     for idx, msg in enumerate(messages):
-        prefix_text = tokenizer.apply_chat_template(
-            messages[:idx],
-            tokenize=False,
-            add_generation_prompt=(msg["role"] == "assistant")
-        )
+        if idx == 0:
+            prefix_ids = []
+        else:
+            prefix_text = tokenizer.apply_chat_template(
+                messages[:idx],
+                tokenize=False,
+                add_generation_prompt=(msg["role"] == "assistant")
+            )
+            prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False)
+
         upto_text = tokenizer.apply_chat_template(
             messages[: idx + 1],
             tokenize=False,
             add_generation_prompt=False
         )
-
-        prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False)
         upto_ids = tokenizer.encode(upto_text, add_special_tokens=False)
 
         if idx == 0:
