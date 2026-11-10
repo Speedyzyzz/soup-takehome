@@ -4,8 +4,8 @@
 > **Role:** Soup AI Engineer Take-Home Project  
 > **Target Architecture:** [`Qwen/Qwen2.5-1.5B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) ($1,543,714,304$ Base Params; 28 Layers, GQA $12\text{Q}/2\text{KV}$, Vocab $151,936$)  
 > **Dataset:** 1,500 curated multi-turn dialogues from [`HuggingFaceTB/smoltalk`](https://huggingface.co/datasets/HuggingFaceTB/smoltalk) (`everyday-conversations`, deduplicated, assistant turns $\ge 40$ chars; 1,450 train / 50 held-out eval)  
-> **Hardware Target:** Free Google Colab NVIDIA Tesla T4 GPU (`15,360 MiB` / `15.00 GiB` Usable VRAM, `sm_75` Turing Architecture)  
-> **Stack:** `soup-cli[train]` v0.77.2 + [PyTorch 2.4](https://pytorch.org/), [Transformers 4.45](https://huggingface.co/docs/transformers), [PEFT 0.13](https://github.com/huggingface/peft) (`rsLoRA` + `NEFTune`), and [BitsAndBytes 0.43](https://github.com/bitsandbytes-foundation/bitsandbytes) (`NF4`)  
+> **Hardware Target:** Google Colab / Kaggle NVIDIA Tesla T4 GPU (`15,360 MiB` / `15.00 GiB` Usable VRAM, `sm_75` Turing Architecture)  
+> **Stack:** `soup-cli[train]` v0.77.2 + [PyTorch](https://pytorch.org/), [Transformers](https://huggingface.co/docs/transformers), [PEFT](https://github.com/huggingface/peft) (`rsLoRA` + `NEFTune`), and [BitsAndBytes](https://github.com/bitsandbytes-foundation/bitsandbytes) (`NF4`)  
 
 ## Architecture & Verification Pipeline
 
@@ -16,7 +16,7 @@ flowchart TD
     
     subgraph SFT_Engine ["High-Output SFT Engine (2 Epochs = 362 Steps)"]
         D["Qwen2.5-1.5B-Instruct (FP16 Base: 2,944 MiB)"] --> E["rsLoRA Injection (r=16, alpha=32, scale=8.0)<br/>All 7 Projections = 18,464,768 Trainable Params"]
-        E --> F["Fused AdamW + NEFTune (alpha=5.0) + Cosine LR<br/>Grad Checkpointing (use_reentrant=False)<br/>Peak VRAM: 6,420 MiB (6.27 GiB) / 15.00 GiB"]
+        E --> F["AdamW + NEFTune (alpha=5.0) + Cosine LR (warmup_steps=18)<br/>Grad Checkpointing (use_reentrant=False)<br/>Peak VRAM: 6,420 MiB (6.27 GiB) / 15.00 GiB"]
     end
     
     C --> SFT_Engine
@@ -54,7 +54,7 @@ The NVIDIA Tesla T4 provides **15,360 MiB (15.00 GiB)** of usable VRAM. With `gr
 |---|---|---|---|---|---|
 | **Base Model Weights** | FP16 (2 B/param) | $1,543,714,304 \times 2\text{ B}$ (`lm_head` tied to `embed_tokens`) | **2,944.40 MiB** (`2.88 GiB`) | `2,952 MiB` (`2.88 GiB`) | `+7.6 MiB` for RoPE cos/sin caches and non-parameter buffers. |
 | **rsLoRA Master Weights** | FP32 (4 B/param) | $28 \times 659,456 = 18,464,768 \times 4\text{ B}$ | **70.44 MiB** (`0.07 GiB`) | `71 MiB` (`0.07 GiB`) | PEFT keeps trainable adapter weights in FP32 during AMP training (`35.22 MiB` on disk in FP16). |
-| **AdamW Optimizer States** | FP32 ($m, v$: 8 B/param) | $18,464,768 \times 8\text{ B}$ (`adamw_torch_fused`) | **140.88 MiB** (`0.14 GiB`) | `142 MiB` (`0.14 GiB`) | First and second moments allocated only for the `18.46M` trainable adapter parameters. |
+| **AdamW Optimizer States** | FP32 ($m, v$: 8 B/param) | $18,464,768 \times 8\text{ B}$ (`adamw_torch`) | **140.88 MiB** (`0.14 GiB`) | `142 MiB` (`0.14 GiB`) | First and second moments allocated only for the `18.46M` trainable adapter parameters. |
 | **rsLoRA Gradients** | FP32 (4 B/param) | $18,464,768 \times 4\text{ B}$ | **70.44 MiB** (`0.07 GiB`) | `71 MiB` (`0.07 GiB`) | Unscaled FP32 adapter gradients prior to `clip_grad_norm_(1.0)`. |
 | **Checkpointed Activations** | FP16 (`use_cache=False`) | $28 \times (2 \times 512 \times 1536 \times 2\text{ B}) + \text{1-Layer Recompute}$ | **410.00 MiB** (`0.40 GiB`) | `424 MiB` (`0.41 GiB`) | $84.0\text{ MiB}$ layer-boundary checkpoints + $\sim 340\text{ MiB}$ single-layer recomputation buffer. |
 | **Logits + FP32 CE Loss Spike** | FP16 $\rightarrow$ 3$\times$ FP32 | $2 \times 512 \times 151,936 \times (2 + 4 + 4 + 4)\text{ B}$ | **2,077.25 MiB** (`2.03 GiB`) | `2,084 MiB` (`2.04 GiB`) | FP16 `lm_head` logits ($296.75\text{ MiB}$) + FP32 upcast, `shift_logits`, and $\nabla\mathcal{L}_{\text{CE}}$ ($3 \times 593.5\text{ MiB}$). |
@@ -83,14 +83,25 @@ The NVIDIA Tesla T4 provides **15,360 MiB (15.00 GiB)** of usable VRAM. With `gr
 
 | # | Pipeline Stage | Silent Failure Mode | Detection & Verification Procedure | Caught by Soup Built-Ins? |
 |---|---|---|---|---|
-| **1** | **Data $\rightarrow$ Collator** | **Multi-Turn Label Mask Misalignment:** Filtering `role != "assistant"` concatenates user turns at the front and unmasks later user turns in multi-turn dialogues. | Tokenize turn-by-turn via `build_assistant_masked_labels`; decode unmasked tokens (`labels != -100`) and assert zero `<\|im_start\|>user` headers appear. | **Partially** (`soup data doctor --show-mask` checks built-in collators, not custom dataset mappers). |
+| **1** | **Data $\rightarrow$ Collator** | **Multi-Turn Label Mask Misalignment:** Filtering `role != "assistant"` concatenates user turns at the front and unmasks later user turns in multi-turn dialogues. | Tokenize turn-by-turn via `build_assistant_masked_labels` (with `if idx == 0: prefix_ids = []` guard); decode unmasked tokens (`labels != -100`) and assert zero `<\|im_start\|>user` headers appear. | **Partially** (`soup data doctor --show-mask` checks built-in collators, not custom dataset mappers). |
 | **2** | **Tokenizer & Template** | **Missing `<\|im_end\|>` EOS Token:** Omitting `<\|im_end\|>` (`151645`) from target labels causes infinite generation until `max_new_tokens`. | Assert `151645` closes every unmasked assistant span and verify `10/10` greedy generations terminate before hitting `max_new_tokens=128`. | **Yes** (`soup data doctor` `eos_in_labels` and `bos_duplication` checks). |
 | **3** | **Training (T4 `sm_75`)** | **FP16 Underflow & Frozen-Input Grad Detachment:** Enabling gradient checkpointing on a frozen base model without `enable_input_require_grads()` or `GradScaler` zeroes or detaches gradients. | Enforce `use_reentrant=False`, `enable_input_require_grads()`, and FP16 AMP `GradScaler`; verify non-zero step `grad_norm` (`0.41–0.89`). | **Yes** (`soup doctor` checks `sm_75` and enables FP16 AMP). |
 | **4** | **Merge** | **Untied Embeddings & Wrong LoRA Scaling:** `merge_and_unload()` can untie `lm_head.weight` (+467 MB bloat) or apply $\alpha/r$ instead of `rsLoRA` $\alpha/\sqrt{r}$. | Assert `merged_model.config.tie_word_embeddings == True`, check `use_rslora: true`, and verify SVD top-16 energy is `99.9984%`. | **Partially** (`soup merge` fuses adapters, but does not run SVD rank or weight-tying checks). |
 | **5** | **Quantization** | **Unsaved Quantized Weights / Base-Model Lineage Bug:** Saving only the tokenizer to `./output_4bit` or quantizing `Base` instead of `Merged`. | Call `quant_model.save_pretrained("./output_4bit")` and verify $\|\hat{W}_{\text{4bit}} - W_{\text{merged}}\|_F < \|\hat{W}_{\text{4bit}} - W_{\text{base}}\|_F$ via `dequantize_4bit`. | **No** (Requires explicit dequantized norm distance check in `verify_artifacts.py`). |
 | **6** | **Inference** | **4-Bit Outlier Clipping & Degenerate Loops:** Clipping salient `down_proj` channels causes repetitive looping on open-ended generation despite low perplexity. | Measure token-level $D_{\text{KL}}(P_{\text{merged}} \parallel P_{\text{4bit}}) = 0.01428$ and distinct 4-gram ratio (`0.964`). | **Partially** (`soup ship` checks benchmark accuracy/perplexity, not KL drift or n-gram diversity). |
 
-## 4. Verdict and Final Ship Decision
+## 4. Chronological Debugging Log Across Colab & Kaggle Runs
+
+| # | Environment | Error Encountered | Root Cause | Permanent Resolution |
+|---|---|---|---|---|
+| **1** | **Google Colab Free Tier** | `Runtime disconnected due to inactivity or reaching its maximum duration` | Chrome throttles background tabs; Colab drops idle WebSocket connections after 30 minutes. | Migrated to Kaggle asynchronous batch commit runs (`Save and Run All`). |
+| **2** | **Kaggle (`notebook7fbfe2ec81` v1)** | `Failed after 0 seconds` | Raw `.ipynb` JSON text was pasted into a code cell rather than importing the notebook file. | Imported the native JSON notebook via `File -> Upload Notebook`. |
+| **3** | **Kaggle (`soup_takehome` v1)** | `nvidia-smi: command not found` / `2.11.0+cpu` | Kaggle defaults new notebooks to `Accelerator: None` until phone verification is completed. | Completed SMS verification, enabled the T4 GPU accelerator, and pinned `CUDA_VISIBLE_DEVICES="0"`. |
+| **4** | **Kaggle (`soup_takehome` v2)** | `ValueError: Cannot apply chat template to an empty conversation.` | Calling `tok.apply_chat_template(messages[:idx])` on turn zero (`idx == 0`) passed `[]`, which Qwen's Jinja template rejects. | Added `if idx == 0: prefix_ids = []` guard in `build_notebook.py` and `verify_artifacts.py`. |
+| **5** | **Kaggle (`notebook7fbfe2ec81` v2)** | `ImportError: Found an incompatible version of torchao. Found version 0.10.0...` | Preinstalled `torchao 0.10.0` in the Kaggle container causes `peft.import_utils.is_torchao_available()` to raise an unhandled `ImportError`. | Uninstalled/removed `torchao*` directories, set `sys.modules["torchao"] = None`, and monkey-patched `is_torchao_available = lambda: False`. |
+| **6** | **Kaggle (`soup_takehome` v2 @ 110.6s)** | `TypeError: TrainingArguments.__init__() got an unexpected keyword argument 'warmup_ratio'` | Newly released Transformers v5 removed `warmup_ratio` from `TrainingArguments.__init__`. | Replaced `warmup_ratio=0.05` with exact step count `warmup_steps=18` ($5\%$ of $362$ steps). |
+
+## 5. Verdict and Final Ship Decision
 
 ```text
 ====================================================================================
@@ -109,22 +120,9 @@ DECISION: >>> SHIP <<< (Exit Code: 0 — Conditional on Full GSM8k/Safety Canary
 ====================================================================================
 ```
 
-## 5. Repository Deliverables & Reproduction
+## 6. Repository Deliverables & Reproduction
 
-- `report.md` — Formal 2-page engineering report covering memory budget, 6-part verification proofs, silent failure matrix, surprises/concerns, and AI tools audit.
+- `report.md` — Formal technical engineering report covering memory budget, 6-part verification proofs, silent failure matrix, chronological debugging log, surprises/concerns, and AI tools audit.
 - `verify_artifacts.py` — Standalone 3-artifact verification engine (Frobenius norms, SVD rank-16 spectrum, 4-bit dequantization lineage, KL divergence, perplexity, and EOS generation check).
-- `soup_takehome.ipynb` & `build_notebook.py` — Complete executable Colab T4 training, merging, quantization, and auditing notebook.
+- `soup_takehome.ipynb` & `build_notebook.py` — Complete executable Colab/Kaggle T4 training, merging, quantization, and auditing notebook.
 - `raw_logs.txt` & `nvidia_smi_log.csv` — Timestamped training, merge, quantization, and verification execution logs and GPU VRAM telemetry.
-
-```bash
-# Run the 6-part verification engine across Base, Merged, and 4-Bit artifacts:
-python verify_artifacts.py \
-    --base_model Qwen/Qwen2.5-1.5B-Instruct \
-    --merged_model ./output_merged \
-    --quantized_model ./output_4bit \
-    --lora_rank 16 \
-    --eval_file ./eval_50.jsonl \
-    --device cuda \
-    --plot \
-    --output_json verification_results.json
-```
