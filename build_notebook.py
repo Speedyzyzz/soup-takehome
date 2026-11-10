@@ -78,7 +78,8 @@ print("=" * 78)""")
     add_md("""## Dependencies Installation
 Install `soup-cli[train]`, Hugging Face `transformers`, `peft`, `bitsandbytes`, `accelerate`, `datasets`, and scientific plotting libraries.""")
 
-    add_code("""!pip install -q "soup-cli[train]>=0.77.0" peft bitsandbytes transformers accelerate datasets scipy tabulate matplotlib seaborn
+    add_code("""!pip uninstall -y torchao -q 2>/dev/null || true
+!pip install -q "soup-cli[train]>=0.77.0" peft bitsandbytes transformers accelerate datasets scipy tabulate matplotlib seaborn
 print("All training, quantization, and verification dependencies installed.")""")
 
     # Cell 3: Continuous VRAM Background Logger
@@ -323,6 +324,13 @@ model = AutoModelForCausalLM.from_pretrained(
 model.config.use_cache = False
 model.enable_input_require_grads()
 model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+
+# Guard against environment torchao version conflict in peft
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+except Exception:
+    pass
 
 peft_config = LoraConfig(
     r=16,
