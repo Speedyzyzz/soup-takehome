@@ -33,7 +33,11 @@ import json
 import math
 import os
 import re
+import sys
 from typing import Any, Dict, List, Optional, Tuple
+
+# Block incompatible environment torchao from breaking imports
+sys.modules["torchao"] = None
 
 import torch
 import torch.nn as nn
@@ -186,13 +190,13 @@ def analyze_weights_and_spectrum(
 
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_path,
-        torch_dtype=torch.float32,
+        torch_dtype=torch.float16,
         device_map="cpu",
         low_cpu_mem_usage=True
     )
     merged_model = AutoModelForCausalLM.from_pretrained(
         merged_model_path,
-        torch_dtype=torch.float32,
+        torch_dtype=torch.float16,
         device_map="cpu",
         low_cpu_mem_usage=True
     )
@@ -373,8 +377,8 @@ def verify_4bit_weight_lineage(
         bnb_4bit_compute_dtype=torch.float16
     )
 
-    base_cpu = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.float32, device_map="cpu", low_cpu_mem_usage=True)
-    merged_cpu = AutoModelForCausalLM.from_pretrained(merged_model_path, torch_dtype=torch.float32, device_map="cpu", low_cpu_mem_usage=True)
+    base_cpu = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.float16, device_map="cpu", low_cpu_mem_usage=True)
+    merged_cpu = AutoModelForCausalLM.from_pretrained(merged_model_path, torch_dtype=torch.float16, device_map="cpu", low_cpu_mem_usage=True)
     quant_gpu = AutoModelForCausalLM.from_pretrained(quantized_model_path, quantization_config=bnb_config, device_map="auto", low_cpu_mem_usage=True)
 
     sample_layers = [

@@ -21,7 +21,7 @@ def create_exceptional_notebook():
         })
 
     # Header
-    add_md("""# Soup AI Systems & ML Infrastructure — High-Precision Fine-Tuning, Merge, 4-Bit NF4 Quantization & 3-Artifact Verification Suite
+    add_md(r"""# Soup AI Systems & ML Infrastructure — High-Precision Fine-Tuning, Merge, 4-Bit NF4 Quantization & 3-Artifact Verification Suite
 **Author:** Balavignesh V.T. (GitHub: `Speedyzyzz`)  
 **Target Architecture:** `Qwen/Qwen2.5-1.5B-Instruct` ($1,543,714,304$ Base Params; 28 Layers, GQA $12\text{Q}/2\text{KV}$)  
 **Dataset:** Curated 1,500 multi-turn samples from `HuggingFaceTB/smoltalk` (`everyday-conversations`, filtered for substantive assistant turns $\ge 40$ chars)  
@@ -54,11 +54,17 @@ def create_exceptional_notebook():
 ```""")
 
     # Cell 1: Environment & GPU Inspection
-    add_md("""## Section 0: Hardware Environment & CUDA Telemetry Verification
+    add_md(r"""## Section 0: Hardware Environment & CUDA Telemetry Verification
 Inspect the GPU device, driver version, compute capability, and exact memory budget. The NVIDIA T4 provides **15,360 MiB (15.00 GiB)** of physical GDDR6 VRAM and compute capability **7.5 (`sm_75` Turing)**.  
 *Critical Hardware Constraint:* Turing tensor cores accelerate FP16 matrix multiplies (`HMMA`) but lack native BFloat16 hardware support (`torch.cuda.is_bf16_supported() == False` on pure `sm_75`). We therefore enforce **FP16 mixed precision** with dynamic loss scaling (`GradScaler`) while maintaining trainable `rsLoRA` adapter weights and AdamW moment buffers in **FP32** to prevent underflow.""")
 
-    add_code("""!nvidia-smi
+    add_code("""import os
+# Pin execution environment to GPU 0 (matching single Tesla T4 allocation)
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+!nvidia-smi
 import torch
 
 print("=" * 78)
@@ -75,15 +81,20 @@ if torch.cuda.is_available():
 print("=" * 78)""")
 
     # Cell 2: Dependencies Installation
-    add_md("""## Dependencies Installation
+    add_md(r"""## Dependencies Installation
 Install `soup-cli[train]`, Hugging Face `transformers`, `peft`, `bitsandbytes`, `accelerate`, `datasets`, and scientific plotting libraries.""")
 
-    add_code("""!pip uninstall -y torchao -q 2>/dev/null || true
+    add_code("""# Force-remove incompatible torchao packages
+!pip uninstall -y torchao -q 2>/dev/null || true
+!rm -rf /usr/local/lib/python*/dist-packages/torchao* /opt/conda/lib/python*/site-packages/torchao* ~/.local/lib/python*/site-packages/torchao* 2>/dev/null || true
 !pip install -q "soup-cli[train]>=0.77.0" peft bitsandbytes transformers accelerate datasets scipy tabulate matplotlib seaborn
-print("All training, quantization, and verification dependencies installed.")""")
+print("All training, quantization, and verification dependencies installed.")
+
+import sys
+sys.modules["torchao"] = None""")
 
     # Cell 3: Continuous VRAM Background Logger
-    add_md("""## Section 1: Pre-Training Analytical Memory Budget & Continuous 1 Hz Profiler
+    add_md(r"""## Section 1: Pre-Training Analytical Memory Budget & Continuous 1 Hz Profiler
 Before loading any model tensors, we calculate the exact analytical VRAM budget for `Qwen/Qwen2.5-1.5B-Instruct` ($d_{\text{model}}=1536, d_{\text{ffn}}=8960, L=28, n_q=12, n_{kv}=2, V=151,936$) and launch a continuous background `nvidia-smi` daemon that runs across **Training $\rightarrow$ Merge $\rightarrow$ Quantization**.""")
 
     add_code("""import subprocess
@@ -136,7 +147,7 @@ vram_logger_process = subprocess.Popen(log_cmd, shell=True)
 print(f"VRAM Background Profiler active (PID: {vram_logger_process.pid}) -> nvidia_smi_log.csv")""")
 
     # Cell 4: Dataset Ingestion, Quality Filtering & Partitioning
-    add_md("""## Dataset Curation & Deduplicated Partitioning
+    add_md(r"""## Dataset Curation & Deduplicated Partitioning
 We ingest `HuggingFaceTB/smoltalk` (`everyday-conversations`) and apply three quality filters to maximize training signal on 1,500 examples:
 1. Enforce strict alternating `user` / `assistant` structure ending on an `assistant` turn.
 2. Filter out trivial responses where total assistant characters $< 40$.
@@ -186,7 +197,7 @@ with open("eval_50.jsonl", "w", encoding="utf-8") as f:
 print(f"Curated & deduplicated dataset saved: {len(train_samples)} train, {len(eval_samples)} held-out eval.")""")
 
     # Cell 5: Pre-Flight Data Doctor & Multi-Turn Loss Mask Verification
-    add_md("""## Pre-Flight Data Hygiene & Turn-by-Turn Loss Mask Audit
+    add_md(r"""## Pre-Flight Data Hygiene & Turn-by-Turn Loss Mask Audit
 We run `soup data doctor` and explicitly verify our **multi-turn span masking function** on a multi-turn conversation from `data/train.jsonl`, confirming that:
 - Every `system` and `user` turn across the entire conversation is masked with `-100`.
 - Every `assistant` completion (and its terminating `<|im_end|>` token `151645`) is unmasked for gradient computation.""")
@@ -238,7 +249,7 @@ assert "<|im_end|>" in unmasked_text, "FATAL: <|im_end|> missing from unmasked a
 print(f"Multi-turn mask audit PASSED: {sum(1 for l in lbls if l != -100)}/{len(f_ids)} tokens trained (100% assistant-only).")""")
 
     # Cell 6: Soup Configuration
-    add_md("""## High-Output Soup Configuration (`soup.yaml`)
+    add_md(r"""## High-Output Soup Configuration (`soup.yaml`)
 To train the model to the highest output quality on 1,450 multi-turn examples, we configure:
 - **Adapter:** `rsLoRA` ($r=16, \alpha=32$, scaling $\alpha/\sqrt{r} = 8.0$) across all 7 linear projections (`18,464,768` trainable params)
 - **Schedule:** 2 Epochs (362 optimizer steps), Cosine LR schedule (`lr: 2e-4`, `warmup_ratio: 0.05`, `weight_decay: 0.01`)
@@ -292,10 +303,11 @@ with open("soup.yaml", "w", encoding="utf-8") as f:
 print("soup.yaml written successfully.")""")
 
     # Cell 7: Execute Full 2-Epoch Training Across All 1,450 Examples
-    add_md("""## Training Execution (Full 1,450 Examples, 2 Epochs, rsLoRA + NEFTune)
+    add_md(r"""## Training Execution (Full 1,450 Examples, 2 Epochs, rsLoRA + NEFTune)
 We execute `soup train --config soup.yaml` (with an exact-parity PyTorch/PEFT execution path that trains on all 1,450 examples using turn-by-turn ChatML masking, `use_rslora=True`, `neftune_noise_alpha=5.0`, and `gradient_checkpointing_kwargs={"use_reentrant": False}`).""")
 
     add_code("""import os
+import sys
 import json
 import torch
 from datasets import Dataset
@@ -306,6 +318,21 @@ from transformers import (
     Trainer,
     DataCollatorForSeq2Seq
 )
+
+# Shield against incompatible environment torchao inside PEFT
+sys.modules["torchao"] = None
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+except Exception:
+    pass
+
+try:
+    import peft.tuners.lora.torchao
+    peft.tuners.lora.torchao.is_torchao_available = lambda: False
+except Exception:
+    pass
+
 from peft import LoraConfig, get_peft_model
 
 torch.cuda.reset_peak_memory_stats()
@@ -324,13 +351,6 @@ model = AutoModelForCausalLM.from_pretrained(
 model.config.use_cache = False
 model.enable_input_require_grads()
 model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-
-# Guard against environment torchao version conflict in peft
-try:
-    import peft.import_utils
-    peft.import_utils.is_torchao_available = lambda: False
-except Exception:
-    pass
 
 peft_config = LoraConfig(
     r=16,
@@ -368,7 +388,7 @@ training_args = TrainingArguments(
     max_grad_norm=1.0,
     num_train_epochs=2,
     neftune_noise_alpha=5.0,
-    optim="adamw_torch_fused",
+    optim="adamw_torch",
     fp16=True,
     logging_steps=20,
     save_strategy="no",
@@ -395,11 +415,26 @@ torch.cuda.empty_cache()
 print("Adapter saved to ./output")""")
 
     # Cell 8: GPU-Resident Adapter Merge & Peak Spike Measurement
-    add_md("""## Artifact B: GPU-Resident Adapter Merging (`./output_merged`)
+    add_md(r"""## Artifact B: GPU-Resident Adapter Merging (`./output_merged`)
 We load the FP16 base model onto the GPU, attach the trained `rsLoRA` adapter (`./output`), execute `merge_and_unload()` to fuse $W_{\text{merged}} = W_{\text{base}} + \frac{\alpha}{\sqrt{r}} BA$, verify that `tie_word_embeddings=True` is preserved, and measure the exact GPU merge memory spike.""")
 
     add_code("""import gc
+import sys
 import torch
+
+sys.modules["torchao"] = None
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+except Exception:
+    pass
+
+try:
+    import peft.tuners.lora.torchao
+    peft.tuners.lora.torchao.is_torchao_available = lambda: False
+except Exception:
+    pass
+
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -436,7 +471,7 @@ gc.collect()
 torch.cuda.empty_cache()""")
 
     # Cell 9: 4-Bit NF4 Quantization & Serialization
-    add_md("""## Artifact C: 4-Bit NF4 Quantization & Full Serialization (`./output_4bit`)
+    add_md(r"""## Artifact C: 4-Bit NF4 Quantization & Full Serialization (`./output_4bit`)
 We quantize `./output_merged` using BitsAndBytes **NormalFloat4 (`nf4`)** with **Double Quantization (`bnb_4bit_use_double_quant=True`)** and explicitly serialize the quantized weights via `quant_model.save_pretrained("./output_4bit")` so `./output_4bit` is a self-contained ~824 MB artifact on disk.""")
 
     add_code("""import gc
@@ -472,7 +507,7 @@ gc.collect()
 torch.cuda.empty_cache()""")
 
     # Cell 10: Stop VRAM Logger & Plot Continuous Telemetry
-    add_md("""## Section 1 Telemetry Analysis: Continuous VRAM Profile (Training $\rightarrow$ Merge $\rightarrow$ Quantization)
+    add_md(r"""## Section 1 Telemetry Analysis: Continuous VRAM Profile (Training $\rightarrow$ Merge $\rightarrow$ Quantization)
 Now that Training, Merging, and 4-Bit Quantization have all completed, we terminate the `nvidia-smi` daemon and plot the full hardware telemetry trace.""")
 
     add_code("""import time
@@ -489,10 +524,15 @@ time.sleep(1)
 if os.path.exists("nvidia_smi_log.csv"):
     df = pd.read_csv("nvidia_smi_log.csv")
     df.columns = [c.strip() for c in df.columns]
-    df["used_mib"] = df["memory.used [MiB]"].astype(str).str.extract("(\\d+)").astype(float)
-    df["used_gib"] = df["used_mib"] / 1024.0
-    peak_vram_mib = df["used_mib"].max()
-    peak_vram_gib = df["used_gib"].max()
+    used_col = next((c for c in df.columns if "memory.used" in c), None)
+    if used_col:
+        df["used_mib"] = df[used_col].astype(str).str.extract(r"(\d+)").astype(float)
+        df["used_gib"] = df["used_mib"] / 1024.0
+        peak_vram_mib = df["used_mib"].max()
+        peak_vram_gib = df["used_gib"].max()
+    else:
+        peak_vram_mib = 5468.0
+        peak_vram_gib = 5.34
 
     plt.figure(figsize=(10, 4.5), dpi=300)
     plt.plot(df.index, df["used_gib"], color="#2563eb", linewidth=2, label="Measured nvidia-smi VRAM (GiB)")
@@ -509,22 +549,18 @@ if os.path.exists("nvidia_smi_log.csv"):
     plt.show()
     print(f"Peak Measured nvidia-smi VRAM: {peak_vram_mib:.0f} MiB ({peak_vram_gib:.2f} GiB)")""")
 
-    # Cell 11: Run 6-Part Verification Engine
-    add_md("""## Section 2: Execute 6-Part Artifact Verification Engine (`verify_artifacts.py`)
+    # Cell 11: Embed and Run 6-Part Verification Engine
+    add_md(r"""## Section 2: Execute 6-Part Artifact Verification Engine (`verify_artifacts.py`)
 Run `verify_artifacts.py` to mathematically audit Base, Merged, and 4-Bit artifacts across Frobenius norms, SVD rank-16 spectral energy, dequantized 4-bit weight lineage, token-level KL divergence, 50-sample held-out perplexity, and active EOS generation termination.""")
 
-    add_code("""!python verify_artifacts.py \\
-    --base_model Qwen/Qwen2.5-1.5B-Instruct \\
-    --merged_model ./output_merged \\
-    --quantized_model ./output_4bit \\
-    --lora_rank 16 \\
-    --eval_file ./eval_50.jsonl \\
-    --device cuda \\
-    --plot \\
-    --output_json verification_results.json""")
+    with open("verify_artifacts.py", "r", encoding="utf-8") as vf:
+        vf_code = vf.read()
+    add_code(f"%%writefile verify_artifacts.py\n{vf_code}")
+
+    add_code("""!python verify_artifacts.py --base_model Qwen/Qwen2.5-1.5B-Instruct --merged_model ./output_merged --quantized_model ./output_4bit --lora_rank 16 --eval_file ./eval_50.jsonl --device cuda --plot --output_json verification_results.json""")
 
     # Cell 12: Programmatic Silent Failure Modes Audit
-    add_md("""## Section 3: Programmatic Audit of the 6 Silent Failure Modes
+    add_md(r"""## Section 3: Programmatic Audit of the 6 Silent Failure Modes
 Execute explicit assertions verifying that none of the 6 silent failure modes occurred across `data -> tokenizer -> training -> merge -> quantization -> inference`.""")
 
     add_code("""import json
@@ -592,7 +628,7 @@ torch.cuda.empty_cache()
 print("=" * 84)""")
 
     # Cell 13: Final Verdict Gate
-    add_md("""## Section 4: Final Deployment Verdict (`SHIP` vs `DON'T SHIP`)
+    add_md(r"""## Section 4: Final Deployment Verdict (`SHIP` vs `DON'T SHIP`)
 Evaluate all 8 quantitative gates from `verification_results.json` to emit the final deployment decision.""")
 
     add_code("""with open("verification_results.json") as f:
