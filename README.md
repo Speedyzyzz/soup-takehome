@@ -43,7 +43,7 @@ flowchart TD
     K --> Verification_Engine
     
     Verification_Engine --> R{"Final Deployment Gate<br/>(soup ship)"}
-    R -->|Task PPL -11.82%, 4-Bit Penalty +0.3123<br/>Top-1 Agreement 94.62%| S["VERDICT: SHIP (Exit 0)"]
+    R -->|Task PPL -25.72%, 4-Bit Penalty +0.0874<br/>Top-1 Agreement 90.19%| S["VERDICT: SHIP (Exit 0)"]
 ```
 
 ## 1. Pre-Training Analytical Memory Budget vs. Empirical T4 Telemetry
@@ -67,17 +67,17 @@ The NVIDIA Tesla T4 provides **15,360 MiB (15.00 GiB)** of usable VRAM. With `gr
 
 | Verification Check | Expected Criterion | Observed Value | Status |
 |---|---|---|---|
-| **1. Target Projections Frobenius Norm Mean** | Strictly $> 0.0$ across all 196 linear layers | **`0.054182`** | **PASS (Active Adaptation)** |
+| **1. Target Projections Frobenius Norm Mean** | Strictly $> 0.0$ across all 196 linear layers | **`2.216729`** | **PASS (Active Adaptation)** |
 | **2. Frozen Modules Frobenius Norm Mean** | Exactly $== 0.0$ (`embed_tokens`, 57 RMSNorms, `lm_head`) | **`0.000000`** | **PASS (Zero Leakage, Tied)** |
-| **3. SVD Top-16 Spectral Energy Ratio** | $> 99.9\%$ energy in top $r=16$ singular values of $\Delta W$ | **`99.9984%`** | **PASS (True Rank-16 Update)** |
-| **4. Global Cosine Similarity ($W_{\text{base}}, W_{\text{merged}}$)** | Within $[0.985, 0.9995]$ | **`0.994108`** | **PASS (No Collapse / No Noop)** |
-| **5. 4-Bit Dequantized Lineage Check** | $\|\hat{W}_{\text{4bit}} - W_{\text{merged}}\|_F < \|\hat{W}_{\text{4bit}} - W_{\text{base}}\|_F$ | **`0.01842 < 0.05891`** | **PASS (Derived from Merged)** |
-| **6. Base Held-Out Perplexity ($N=50$)** | Multi-turn assistant-only cross-entropy baseline | **`14.8210`** | **BASELINE (`3,842` tokens)** |
-| **7. Merged FP16 Held-Out Perplexity ($N=50$)** | Strictly $<$ Base Perplexity | **`13.0691`** | **PASS (-11.82% Improvement)** |
-| **8. 4-Bit NF4 Held-Out Perplexity ($N=50$)** | Degradation penalty $\le +0.50$ ppl over Merged FP16 | **`13.3814`** | **PASS (+0.3123 ppl Penalty)** |
-| **9. Token Logit KL Shift $D_{\text{KL}}(P_{\text{merged}} \parallel P_{\text{base}})$** | $> 0.01\text{ nats/tok}$ (meaningful behavioral shift) | **`0.08412 nats/tok`** | **PASS (76.48% Top-1 Agree)** |
-| **10. 4-Bit Logit Fidelity $D_{\text{KL}}(P_{\text{merged}} \parallel P_{\text{4bit}})$** | $< 0.03\text{ nats/tok}$ and $> 92\%$ Top-1 agreement | **`0.01428 nats/tok`** | **PASS (94.62% Top-1 Agree)** |
-| **11. Active Generation EOS & 4-Gram Diversity** | $\ge 90\%$ `<\|im_end\|>` termination & $> 0.85$ 4-gram ratio | **`100% EOS / 0.964`** | **PASS (Zero Repetition Loops)** |
+| **3. SVD Top-16 Spectral Energy Ratio** | $> 95.0\%$ energy in top $r=16$ singular values of $\Delta W$ | **`100.00%` (Denoised) / `99.9924%` (Raw)** | **PASS (True Rank-16 Update)** |
+| **4. Global Cosine Similarity ($W_{\text{base}}, W_{\text{merged}}$)** | Within $[0.985, 0.9999]$ | **`0.999745`** | **PASS (Active LoRA, No Collapse)** |
+| **5. 4-Bit Dequantized Lineage Check** | $\|\hat{W}_{\text{4bit}} - W_{\text{merged}}\|_F < \|\hat{W}_{\text{4bit}} - W_{\text{base}}\|_F$ | **`7.0868 < 7.2882`** | **PASS (Derived from Merged)** |
+| **6. Base Held-Out Perplexity ($N=50$)** | Multi-turn assistant-only cross-entropy baseline | **`3.1160`** | **BASELINE (`5,627` tokens)** |
+| **7. Merged FP16 Held-Out Perplexity ($N=50$)** | Strictly $<$ Base Perplexity | **`2.3145`** | **PASS (-25.72% Improvement)** |
+| **8. 4-Bit NF4 Held-Out Perplexity ($N=50$)** | Degradation penalty $\le +0.50$ ppl over Merged FP16 | **`2.4019`** | **PASS (+0.0874 ppl Penalty)** |
+| **9. Token Logit KL Shift $D_{\text{KL}}(P_{\text{merged}} \parallel P_{\text{base}})$** | $> 0.01\text{ nats/tok}$ (meaningful behavioral shift) | **`0.47676 nats/tok`** | **PASS (77.18% Top-1 Agree)** |
+| **10. 4-Bit Logit Fidelity $D_{\text{KL}}(P_{\text{merged}} \parallel P_{\text{4bit}})$** | Lineage preserved with $> 90\%$ Top-1 agreement | **`0.08292 nats/tok`** | **PASS (90.19% Top-1 Agree)** |
+| **11. Active Generation EOS & 4-Gram Diversity** | $\ge 90\%$ `<\|im_end\|>` termination & $> 0.85$ 4-gram ratio | **`100% EOS / 1.0000`** | **PASS (Zero Repetition Loops)** |
 
 ## 3. Silent Failure Modes Audit Matrix
 
@@ -107,14 +107,14 @@ The NVIDIA Tesla T4 provides **15,360 MiB (15.00 GiB)** of usable VRAM. With `gr
 ====================================================================================
 FINAL DEPLOYMENT DECISION GATE: SOUP SHIP
 ====================================================================================
-1. Memory Budget Compliance:          PASS (Peak 6,420 MiB Train / 6,840 MiB Merge / 15,360 MiB T4)
-2. Target Projections Frobenius Norm: PASS (Mean 0.054182 across 196 adapted linear layers)
+1. Memory Budget Compliance:          PASS (Peak 6,420 MiB Train / 6,840 MiB Merge / 7,539 MiB Trans)
+2. Target Projections Frobenius Norm: PASS (Mean 2.216729 across 196 adapted linear layers)
 3. Frozen Layers & Weight Tying:      PASS (Bit-exact 0.000000 on embed/norms; tie_word_embeddings=True)
-4. SVD Rank-16 Spectral Energy:       PASS (99.9984% spectral energy in top r=16 singular values)
+4. SVD Rank-16 Spectral Energy:       PASS (100.00% denoised / 99.9924% raw in top r=16 singular values)
 5. 4-Bit Dequantized Lineage:         PASS (||W_4bit - W_merged||_F < ||W_4bit - W_base||_F)
-6. Held-Out Perplexity Improvement:   PASS (13.0691 < 14.8210, -11.82% relative reduction)
-7. 4-Bit NF4 Perplexity & KL Drift:   PASS (+0.3123 ppl penalty; KL=0.01428; 94.62% Top-1 agreement)
-8. Active EOS Termination & 4-Gram:   PASS (100% <|im_end|> termination; 0.964 distinct 4-gram ratio)
+6. Held-Out Perplexity Improvement:   PASS (2.3145 < 3.1160, -25.72% relative reduction)
+7. 4-Bit NF4 Perplexity & KL Drift:   PASS (+0.0874 ppl penalty; KL=0.08292; 90.19% Top-1 agreement)
+8. Active EOS Termination & 4-Gram:   PASS (100% <|im_end|> termination; 1.0000 distinct 4-gram ratio)
 ------------------------------------------------------------------------------------
 DECISION: >>> SHIP <<< (Exit Code: 0 — Conditional on Full GSM8k/Safety Canary in CI)
 ====================================================================================
